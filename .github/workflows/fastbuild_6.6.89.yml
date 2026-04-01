@@ -223,41 +223,28 @@ jobs:
           echo "CONFIG_HEADERS_INSTALL=n" >> common/arch/arm64/configs/gki_defconfig
           sed -i 's/check_defconfig//' common/build.config.gki
 
-      - name: 构建内核（伪装时间）
+      - name: 构建内核（固定时间）
         run: |
           WORKDIR="$(pwd)"
           export PATH="$WORKDIR/kernel_workspace/clang18/bin:$PATH"
           export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
           cd kernel_workspace/common
 
-          export FAKESTAT="2025-09-19 06:13:40"
-          export FAKETIME="@2025-09-19 06:13:40"
+          # 永久固定内核构建时间，无需faketime
           export TZ=UTC
-          SO_DIR=$(pwd)
+          export KBUILD_BUILD_TIMESTAMP="Fri Sep 19 06:13:40 UTC 2025"
+          export SOURCE_DATE_EPOCH=1758262420
 
-          cat > cc-wrapper <<'EOF'
-          #!/bin/bash
-          export LD_PRELOAD="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
-          export FAKESTAT="$FAKESTAT"
-          export FAKETIME="$FAKETIME"
-          ccache clang "$@"
-          EOF
-
-          cat > ld-wrapper <<'EOF'
-          #!/bin/bash
-          export LD_PRELOAD="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
-          export FAKESTAT="$FAKESTAT"
-          export FAKETIME="$FAKETIME"
-          ld.lld "$@"
-          EOF
-
-          chmod +x cc-wrapper ld-wrapper
-
-          make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" O=out gki_defconfig
           make -j$(nproc) LLVM=1 ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="${SO_DIR}/cc-wrapper" \
-            LD="${SO_DIR}/ld-wrapper" \
+            CC="ccache clang" \
+            LD="ld.lld" \
+            O=out gki_defconfig
+
+          make -j$(nproc) LLVM=1 ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="ccache clang" \
+            LD="ld.lld" \
             O=out Image
 
       - name: 保存缓存
@@ -292,11 +279,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@v8
-      - name: 发布
-        uses: softprops/gh-release@v1
+      - name: 创建发布
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: build-$(date -u +%Y%m%d%H%M%S)
-          name: 6.6.89 伪装版内核
+          tag: build-$(date -u +%Y%m%d%H%M%S)
+          name: 6.6.89 固定时间版内核
           body: "编译时间：Fri Sep 19 06:13:40 UTC 2025"
           draft: false
-          files: "*.zip"
+          artifacts: "*.zip"
