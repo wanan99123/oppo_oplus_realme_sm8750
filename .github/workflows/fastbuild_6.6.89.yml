@@ -235,24 +235,30 @@ jobs:
           export TZ=UTC
           SO_DIR=$(pwd)
 
-          cat > cc-wrapper <<EOF
+          cat > cc-wrapper <<'EOF'
           #!/bin/bash
           export LD_PRELOAD="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
           export FAKESTAT="$FAKESTAT"
           export FAKETIME="$FAKETIME"
-          ccache clang "\$@"
+          ccache clang "$@"
           EOF
-          cat > ld-wrapper <<EOF
+
+          cat > ld-wrapper <<'EOF'
           #!/bin/bash
           export LD_PRELOAD="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
           export FAKESTAT="$FAKESTAT"
           export FAKETIME="$FAKETIME"
-          ld.lld "\$@"
+          ld.lld "$@"
           EOF
+
           chmod +x cc-wrapper ld-wrapper
 
           make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" O=out gki_defconfig
-          make -j$(nproc) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="./cc-wrapper" LD="./ld-wrapper" O=out Image
+          make -j$(nproc) LLVM=1 ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="${SO_DIR}/cc-wrapper" \
+            LD="${SO_DIR}/ld-wrapper" \
+            O=out Image
 
       - name: 保存缓存
         if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
