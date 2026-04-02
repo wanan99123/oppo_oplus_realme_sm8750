@@ -192,29 +192,6 @@ jobs:
           fi
           echo "ksuver=$KSUVER" >> $GITHUB_OUTPUT
 
-      # ====================== 我帮你加的 KPM 完整逻辑 ======================
-      - name: 应用 KernelPatch / KPM
-        if: inputs.kpm_enable != 'false'
-        run: |
-          cd kernel_workspace/common
-          # 拉 KP 补丁
-          git clone --depth=1 https://github.com/Chomier123/kernelpatch.git
-          cd kernelpatch
-          bash install.sh ../
-          cd ..
-          rm -rf kernelpatch
-
-          # 根据选项开启 KPM / KPN
-          if [[ "${{ github.event.inputs.kpm_enable }}" == "builtin" ]]; then
-            echo "CONFIG_KPM=y" >> arch/arm64/configs/gki_defconfig
-            echo "CONFIG_KPM_HOOK=y" >> arch/arm64/configs/gki_defconfig
-          elif [[ "${{ github.event.inputs.kpm_enable }}" == "kpn" ]]; then
-            echo "CONFIG_KPM=y" >> arch/arm64/configs/gki_defconfig
-            echo "CONFIG_KPM_HOOK=y" >> arch/arm64/configs/gki_defconfig
-            echo "CONFIG_KPN=y" >> arch/arm64/configs/gki_defconfig
-          fi
-      # ===================================================================
-
       - name: 应用SUSFS
         if: inputs.susfs_enable
         run: |
@@ -246,6 +223,10 @@ jobs:
           echo "CONFIG_HEADERS_INSTALL=n" >> common/arch/arm64/configs/gki_defconfig
           sed -i 's/check_defconfig//' common/build.config.gki
 
+          if [[ ${{ github.event.inputs.kpm_enable }} == 'builtin' && ( "${{ github.event.inputs.ksu_type }}" == "sukisu" || "${{ github.event.inputs.ksu_type }}" == "resukisu" ) ]]; then
+            echo "CONFIG_KPM=y" >> common/arch/arm64/configs/gki_defconfig
+          fi
+
       - name: 构建内核（固定时间）
         run: |
           WORKDIR="$(pwd)"
@@ -253,7 +234,6 @@ jobs:
           export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
           cd kernel_workspace/common
 
-          # 永久固定内核构建时间，无需faketime
           export TZ=UTC
           export KBUILD_BUILD_TIMESTAMP="Fri Sep 19 06:13:40 UTC 2025"
           export SOURCE_DATE_EPOCH=1758262420
@@ -270,6 +250,20 @@ jobs:
             LD="ld.lld" \
             O=out Image
 
+      # ===================== 从你6.6.56提取的KPM镜像修补 =====================
+      - name: 应用KPM并修补内核
+        run: |
+          if [[ ${{ github.event.inputs.kpm_enable }} == 'builtin' && ( "${{ github.event.inputs.ksu_type }}" == "sukisu" || "${{ github.event.inputs.ksu_type }}" == "resukisu" ) ]]; then
+            echo "正在应用KPM并修补内核..."
+            cd kernel_workspace/common/out/arch/arm64/boot
+            curl -LO https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/latest/download/patch_linux
+            chmod +x patch_linux
+            ./patch_linux
+            rm -f Image
+            mv oImage Image
+          fi
+      # ======================================================================
+
       - name: 保存缓存
         if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -285,6 +279,11 @@ jobs:
           rm -rf AnyKernel3/.git
           cp common/out/arch/arm64/boot/Image AnyKernel3/
           cd AnyKernel3
+
+          if [[ ${{ github.event.inputs.kpm_enable }} == 'kpn' ]]; then
+            wget https://github.com/cctv18/KPatch-Next/releases/latest/download/kpn.zip
+          fi
+
           KSU_TYPENAME=${{ github.event.inputs.ksu_type }}
           AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ steps.ksu_version.outputs.ksuver }}_6.6.89_A15_android15-8-gf4dc45704e54-abogki446052083-4k.zip
           zip -r ../$AK3_NAME .
@@ -307,7 +306,8 @@ jobs:
         with:
           tag: build-${{ github.run_id }}
           name: 6.6.89 固定时间版内核
-          body: ''
+          body: |
+            KPM支持: ${{ github.event.inputs.kpm_enable }}
           draft: false
           artifacts: "*.zip"
           token: ${{ secrets.GITHUB_TOKEN }}
