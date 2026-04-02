@@ -282,8 +282,9 @@ jobs:
       - name: 创建发布
         uses: ncipollo/release-action@v1
         with:
-          tag: build-$(date -u +%Y%m%d%H%M%S)
+          tag: build-${{ github.run_id }}
           name: 6.6.89 固定时间版内核
-          body: "编译时间：Fri Sep 19 06:13:40 UTC 2025"
+          body: ''
           draft: false
           artifacts: "*.zip"
+          token: ${{ secrets.GITHUB_TOKEN }}
