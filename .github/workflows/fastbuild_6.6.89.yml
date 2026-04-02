@@ -192,6 +192,29 @@ jobs:
           fi
           echo "ksuver=$KSUVER" >> $GITHUB_OUTPUT
 
+      # ====================== 我帮你加的 KPM 完整逻辑 ======================
+      - name: 应用 KernelPatch / KPM
+        if: inputs.kpm_enable != 'false'
+        run: |
+          cd kernel_workspace/common
+          # 拉 KP 补丁
+          git clone --depth=1 https://github.com/Chomier123/kernelpatch.git
+          cd kernelpatch
+          bash install.sh ../
+          cd ..
+          rm -rf kernelpatch
+
+          # 根据选项开启 KPM / KPN
+          if [[ "${{ github.event.inputs.kpm_enable }}" == "builtin" ]]; then
+            echo "CONFIG_KPM=y" >> arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KPM_HOOK=y" >> arch/arm64/configs/gki_defconfig
+          elif [[ "${{ github.event.inputs.kpm_enable }}" == "kpn" ]]; then
+            echo "CONFIG_KPM=y" >> arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KPM_HOOK=y" >> arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KPN=y" >> arch/arm64/configs/gki_defconfig
+          fi
+      # ===================================================================
+
       - name: 应用SUSFS
         if: inputs.susfs_enable
         run: |
