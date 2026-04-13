@@ -420,6 +420,11 @@ jobs:
           cd AnyKernel3
           cp ../common/out/arch/arm64/boot/Image ./Image
           
+          if [[ ! -f ./Image ]]; then
+            echo "未找到内核镜像文件，构建可能出错"
+            exit 1
+          fi
+          
           if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
             KSU_TYPENAME="SukiSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
@@ -445,8 +450,18 @@ jobs:
           else
             AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ steps.ksu_version.outputs.ksuver }}_6.6.66_A15_${{ env.KERNEL_NAME }}.zip
           fi
+          
           zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
+          
+          # 确保 ZIP 文件存在
+          if [[ -f "../$AK3_NAME" ]]; then
+            echo "ZIP 文件创建成功: ../$AK3_NAME"
+            ls -lh "../$AK3_NAME"
+          else
+            echo "ZIP 文件创建失败!"
+            exit 1
+          fi
 
       - name: 上传 Ccache 调试日志
         if: always() && inputs.ccache_debug
@@ -459,8 +474,9 @@ jobs:
       - name: 上传 ZIP 工件
         uses: actions/upload-artifact@v7
         with:
+          name: kernel-zip
           path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
-          archive: false
+          if-no-files-found: error
 
   release:
     needs: build
@@ -474,8 +490,15 @@ jobs:
       - name: 下载 ZIP 工件
         uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.build.outputs.ak3name }}
+          name: kernel-zip
           path: ./
+
+      - name: 列出下载的文件
+        run: |
+          echo "当前目录文件列表:"
+          ls -la
+          echo "查找 zip 文件:"
+          find . -name "*.zip" -type f
 
       - name: 设置环境变量
         run: |
@@ -517,4 +540,5 @@ jobs:
             - KSU类型: ${{ env.KSU_TYPENAME }}
           draft: false
           prerelease: false
-          artifacts: ./*.zip
+          artifacts: "*.zip"
+          token: ${{ secrets.GITHUB_TOKEN }}
