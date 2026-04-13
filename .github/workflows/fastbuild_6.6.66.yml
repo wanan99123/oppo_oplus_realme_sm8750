@@ -130,9 +130,13 @@ jobs:
           wait
           
           rm common/android/abi_gki_protected_exports_* 2>/dev/null || true
+          
+          # 修改 setlocalversion 确保完整版本号显示
           for f in common/scripts/setlocalversion; do
+            # 移除 dirty 标记
             sed -i 's/ -dirty//g' "$f"
-            sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' "$f"
+            # 保留完整的版本信息，不截断
+            sed -i '/^res=$(echo "$res" | sed /d' "$f"
           done
 
       - name: 配置ccache目录
@@ -178,20 +182,27 @@ jobs:
         run: |
           cd kernel_workspace
           if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
+            echo "正在配置SukiSU Ultra..."
             curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s builtin
             cd ./KernelSU
             GIT_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
             KSU_API_VERSION=$(curl -s "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/Kbuild" | grep -m1 "KSU_VERSION_API :=" | awk -F'= ' '{print $2}' | tr -d '[:space:]' || echo "3.1.7")
             KSUVER=$(expr $(git rev-list --count main) + 37185 2>/dev/null || echo 114514)
           elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
+            echo "正在配置ReSukiSU..."
+            # 移除 @cctv18 后缀
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
-            echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
+            # 修改 KSU 版本显示，去掉 @cctv18
             cd ./KernelSU
             KSUVER=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
+            cd ..
+            # 不添加带 @cctv18 的配置
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
+            echo "正在配置KernelSU Next..."
             curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
             KSUVER=114514
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
+            echo "正在配置原版 KernelSU..."
             curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
             KSUVER=114514
           else
@@ -204,6 +215,7 @@ jobs:
         run: |
           cd kernel_workspace
           if [[ ${{ github.event.inputs.ksu_type }} != "none" ]]; then
+            echo "正在添加susfs补丁..."
             git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
             cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch ./common/
             cp -r ./susfs4ksu/kernel_patches/fs/. ./common/fs/
@@ -349,20 +361,33 @@ jobs:
           curl -sSL https://github.com/cctv18/Baseband-guard/raw/master/setup.sh | bash
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 
-      - name: 添加制作名称
+      - name: 添加内核版本后缀
         run: |
           cd kernel_workspace
+          
+          # 确定最终的后缀
           if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ github.event.inputs.kernel_suffix }}\"|" "$f"
-            done
+            FINAL_SUFFIX="${{ github.event.inputs.kernel_suffix }}"
           else
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ env.KERNEL_NAME }}\"|" "$f"
-            done
+            FINAL_SUFFIX="${{ env.KERNEL_NAME }}"
           fi
-          sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
+          
+          echo "设置内核版本后缀为: $FINAL_SUFFIX"
+          
+          # 修改 setlocalversion 脚本
+          for f in ./common/scripts/setlocalversion; do
+            # 完全替换 localversion 的输出逻辑
+            sed -i '/^res=/c\res=""' "$f"
+            sed -i '/echo "\\$res"/c\echo "'"-$FINAL_SUFFIX"'"' "$f"
+          done
+          
+          # 禁用自动 localversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_LOCALVERSION=\"-$FINAL_SUFFIX\"" >> ./common/arch/arm64/configs/gki_defconfig
+          
+          # 验证修改
+          echo "验证 setlocalversion 修改:"
+          tail -5 ./common/scripts/setlocalversion
            
       - name: 构建内核（固定时间）
         run: |
@@ -389,6 +414,10 @@ jobs:
           
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
+          
+          # 显示内核版本信息
+          echo "内核版本信息:"
+          strings out/arch/arm64/boot/Image | grep "Linux version" | head -1
           
           ccache -s
           df -h
@@ -454,7 +483,6 @@ jobs:
           zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
           
-          # 确保 ZIP 文件存在
           if [[ -f "../$AK3_NAME" ]]; then
             echo "ZIP 文件创建成功: ../$AK3_NAME"
             ls -lh "../$AK3_NAME"
